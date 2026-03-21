@@ -4,6 +4,7 @@ import re
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 
 def scrape_article(url: str) -> str | None:
@@ -27,10 +28,16 @@ def scrape_article(url: str) -> str | None:
 
     try:
         soup = BeautifulSoup(response.text, "html.parser")
-        for tag in soup(["script", "style", "noscript"]):
+        for tag in soup(["script", "style", "noscript", "header", "footer"]):
             tag.decompose()
 
-        text = _clean_text(soup.get_text(separator=" ", strip=True))
+        content_root = soup.find("article")
+        if not isinstance(content_root, Tag):
+            content_root = soup.find("main")
+        if not isinstance(content_root, Tag):
+            content_root = soup
+
+        text = _clean_text(content_root.get_text(separator=" ", strip=True))
         if not text:
             return None
 
