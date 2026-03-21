@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from urllib.parse import urlparse
 
 from app.schemas.analyze import AnalyzeRequest
+from app.services import analyze_company_documents
 from app.tools.scraper import scrape_article
 from app.tools.search import search_company
 
@@ -40,9 +41,15 @@ def analyze(payload: AnalyzeRequest):
         if len(documents) >= 3:
             break
 
+    analysis = analyze_company_documents(
+        company_name=payload.company_name,
+        documents=[str(doc["text"]) for doc in documents if doc.get("text")],
+    )
+
     return {
         "company_name": payload.company_name,
         "documents": documents,
+        "analysis": analysis.model_dump(),
     }
 
 

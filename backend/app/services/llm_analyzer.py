@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -11,11 +12,11 @@ def analyze_company_documents(company_name: str, documents: list[str]) -> Analys
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return _empty_result()
+        return _fallback_result(company_name)
 
     merged_documents = "\n\n---\n\n".join(documents)
     if not merged_documents.strip():
-        return _empty_result()
+        return _fallback_result(company_name)
 
     prompt = (
         "You are an analyst.\n"
@@ -43,14 +44,36 @@ def analyze_company_documents(company_name: str, documents: list[str]) -> Analys
         )
         raw = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)
-        return AnalysisResult(
-            summary=str(parsed.get("summary", "")),
-            features=[str(item) for item in parsed.get("features", [])],
-            competitors=[str(item) for item in parsed.get("competitors", [])],
-        )
+        return _to_analysis_result(parsed, company_name)
     except Exception:
-        return _empty_result()
+        return _fallback_result(company_name)
 
 
-def _empty_result() -> AnalysisResult:
-    return AnalysisResult(summary="", features=[], competitors=[])
+def _to_analysis_result(parsed: Any, company_name: str) -> AnalysisResult:
+    if not isinstance(parsed, dict):
+        return _fallback_result(company_name)
+
+    features_raw = parsed.get("features", [])
+    competitors_raw = parsed.get("competitors", [])
+    if not isinstance(features_raw, list):
+        features_raw = []
+    if not isinstance(competitors_raw, list):
+        competitors_raw = []
+
+    summary = str(parsed.get("summary", "")).strip()
+    if not summary:
+        summary = f"{company_name}에 대한 분석 결과를 생성하지 못했습니다."
+
+    return AnalysisResult(
+        summary=summary,
+        features=[str(item).strip() for item in features_raw if str(item).strip()],
+        competitors=[str(item).strip() for item in competitors_raw if str(item).strip()],
+    )
+
+
+def _fallback_result(company_name: str) -> AnalysisResult:
+    return AnalysisResult(
+        summary=f"{company_name}에 대한 분석 결과를 생성하지 못했습니다.",
+        features=[],
+        competitors=[],
+    )
