@@ -20,15 +20,26 @@ def analyze_company_documents(company_name: str, documents: list[str]) -> Analys
 
     prompt = (
         "You are an analyst.\n"
-        "Analyze the following documents about the company and extract:\n"
-        "1) summary\n"
-        "2) core features\n"
-        "3) potential competitors\n\n"
+        "Analyze the following documents and extract company insights.\n"
+        "추측하지 말 것.\n"
+        "문서 내용 기반으로만 작성.\n"
+        "JSON 이외의 텍스트 출력 금지.\n\n"
+        "Rules:\n"
+        "- summary: concise company summary based only on documents.\n"
+        "- features: only the most important features, max 5 items.\n"
+        "- features: remove trivial or duplicate items.\n"
+        "- competitors: extract only company names explicitly mentioned in documents.\n"
+        "- competitors: if no clear competitor company name exists, return [].\n"
+        '- competitors: never output generic categories (e.g., "부대찌개 식당", "한식당").\n\n'
         f"Company: {company_name}\n\n"
         "Documents:\n"
         f"{merged_documents}\n\n"
-        "Return JSON only with this exact schema:\n"
-        '{ "summary": "string", "features": ["string"], "competitors": ["string"] }'
+        "Output must be exactly this JSON schema:\n"
+        '{\n'
+        '  "summary": "string",\n'
+        '  "features": ["string"],\n'
+        '  "competitors": ["string"]\n'
+        '}'
     )
 
     try:
@@ -64,10 +75,26 @@ def _to_analysis_result(parsed: Any, company_name: str) -> AnalysisResult:
     if not summary:
         summary = f"{company_name}에 대한 분석 결과를 생성하지 못했습니다."
 
+    features: list[str] = []
+    for item in features_raw:
+        value = str(item).strip()
+        if not value or value in features:
+            continue
+        features.append(value)
+        if len(features) >= 5:
+            break
+
+    competitors: list[str] = []
+    for item in competitors_raw:
+        value = str(item).strip()
+        if not value or value in competitors:
+            continue
+        competitors.append(value)
+
     return AnalysisResult(
         summary=summary,
-        features=[str(item).strip() for item in features_raw if str(item).strip()],
-        competitors=[str(item).strip() for item in competitors_raw if str(item).strip()],
+        features=features,
+        competitors=competitors,
     )
 
 
