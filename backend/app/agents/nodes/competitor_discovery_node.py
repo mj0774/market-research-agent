@@ -3,37 +3,29 @@ from app.tools.search import search_company
 
 
 def competitor_discovery_node(state: MarketResearchState) -> dict:
-    """업체명 기반 검색으로 경쟁사 후보를 수집하는 노드입니다."""
-    # 상태에서 업체명을 가져와 경쟁사 탐색용 검색어 3개를 생성합니다.
-    company_name = state["company_name"]
-    company_name_lower = company_name.strip().lower()
-    queries = [
-        f"{company_name} 경쟁사",
-        f"{company_name} 유사 식당",
-        f"{company_name} 맛집",
-    ]
+    """시장 키워드 기반 검색 결과에서 경쟁사 후보를 추출하는 노드입니다."""
+    # 상태에서 업체명과 시장 키워드를 가져옵니다.
+    company_name = str(state["company_name"]).strip()
+    company_name_lower = company_name.lower()
+    market_keywords = state.get("market_keywords", [])
+    if not isinstance(market_keywords, list):
+        market_keywords = []
 
-    # 각 쿼리 검색 결과를 하나의 리스트로 합칩니다.
+    # 각 키워드마다 검색 쿼리를 확장합니다.
+    queries: list[str] = []
+    for keyword in market_keywords:
+        keyword_text = str(keyword).strip()
+        if not keyword_text:
+            continue
+        queries.append(f"{keyword_text} 맛집")
+        queries.append(f"{keyword_text} 추천")
+        queries.append(f"{keyword_text} TOP")
+
+    # 여러 번 검색한 결과를 하나의 리스트로 합칩니다.
     merged_results = []
     for query in queries:
         merged_results.extend(search_company(query))
 
-    # 제외할 키워드 목록입니다.
-    excluded_keywords = [
-        "오뎅식당",
-        "유사 상품",
-        "주의 안내",
-        "나무위키",
-        "기사",
-        "뉴스",
-        "블로그",
-        "후기",
-        "top",
-        "추천",
-        "정리",
-    ]
-
-    # 제목 필터링 후 중복 제거하여 최대 5개의 후보를 수집합니다.
     competitor_candidates: list[str] = []
     seen = set()
 
@@ -41,30 +33,42 @@ def competitor_discovery_node(state: MarketResearchState) -> dict:
         title = str(item.get("title", "")).strip()
         if not title:
             continue
-        if len(title) > 25:
-            continue
 
         title_lower = title.lower()
-        # 회사명이 포함되거나 회사명과 동일한 제목은 제외합니다.
-        if company_name_lower and company_name_lower in title_lower:
-            continue
-        if title_lower == company_name_lower:
+        # 핵심 필터: title에 맛집/추천/TOP이 있는 결과만 사용합니다.
+        if not ("맛집" in title or "추천" in title or "top" in title_lower):
             continue
 
-        # 불필요 키워드가 포함된 제목은 제외합니다.
-        if any(keyword in title_lower for keyword in excluded_keywords):
+        # 후보 추출: 쉼표 기준으로 자르고, 키워드 표현을 제거한 앞부분만 사용합니다.
+        candidate = title.split(",")[0].strip()
+        candidate = candidate.split("|")[0].strip()
+        candidate = candidate.split("-")[0].strip()
+        candidate = candidate.replace("맛집", "")
+        candidate = candidate.replace("추천", "")
+        candidate = candidate.replace("TOP", "")
+        candidate = candidate.replace("top", "")
+        candidate = candidate.strip(" -:|[]()")
+        candidate = " ".join(candidate.split())
+        if not candidate:
             continue
 
-        # 중복 후보는 제외합니다.
-        if title_lower in seen:
+        candidate_lower = candidate.lower()
+        # 자기 자신(업체명)은 후보에서 제외합니다.
+        if candidate_lower == company_name_lower:
             continue
-        seen.add(title_lower)
-        competitor_candidates.append(title)
+        if company_name_lower and company_name_lower in candidate_lower:
+            continue
 
+        # 중복 제거를 유지합니다.
+        if candidate_lower in seen:
+            continue
+        seen.add(candidate_lower)
+        competitor_candidates.append(candidate)
+
+        # 최대 5개까지만 유지합니다.
         if len(competitor_candidates) >= 5:
             break
 
-    # 상태 업데이트 형식에 맞춰 competitor_candidates를 반환합니다.
     return {
         "competitor_candidates": competitor_candidates,
     }

@@ -8,32 +8,49 @@ from app.agents.state import MarketResearchState
 
 
 def refine_competitor_node(state: MarketResearchState) -> dict:
-    """경쟁사 후보를 실제 음식점 이름으로 정제하는 노드입니다."""
-    # 상태에서 업체명과 경쟁사 후보를 가져옵니다.
-    company_name = state["company_name"]
+    """경쟁사 후보에서 직접 경쟁사(direct_competitors)만 정제하는 노드입니다."""
+    # 상태에서 업체명, 분석 특징, 경쟁사 후보를 가져옵니다.
+    company_name = str(state.get("company_name", "")).strip()
     competitor_candidates = state.get("competitor_candidates", [])
+    if not isinstance(competitor_candidates, list):
+        competitor_candidates = []
 
-    # 기존 analysis 값을 유지하면서 competitors만 교체하기 위해 복사합니다.
     current_analysis = dict(state.get("analysis", {}))
+    features = current_analysis.get("features", [])
+    if not isinstance(features, list):
+        features = []
+
+    # 기존 market_peers는 유지해야 하므로 현재 값을 그대로 보존합니다.
+    existing_market_peers = current_analysis.get("market_peers", [])
+    if not isinstance(existing_market_peers, list):
+        existing_market_peers = []
 
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
+        current_analysis["direct_competitors"] = []
+        current_analysis["market_peers"] = existing_market_peers
         return {"analysis": current_analysis}
 
     prompt = (
-        "너는 음식점 경쟁사 정제 도우미다.\n"
-        "아래 competitor_candidates를 보고 실제 음식점 이름만 추출하라.\n\n"
+        "너는 경쟁사 정제 분석가다.\n"
+        "아래 competitor_candidates에서 direct_competitors만 추출하라.\n\n"
         "조건:\n"
-        "- 뉴스 제목, 일반 문장, 설명 문구는 제거\n"
-        "- 'TOP10', '추천', '기사' 같은 표현은 제거\n"
-        "- 같은 업체명은 중복 제거\n"
-        "- 최대 5개만 반환\n"
-        "- 추측 금지\n\n"
-        f"기준 업체명: {company_name}\n"
+        "- company_name과 같은 시장 포지션의 브랜드만 선택\n"
+        "- 가격대가 다른 브랜드는 제외\n"
+        "- 타겟 고객층이 다른 브랜드는 제외\n"
+        "- 프리미엄 vs 저가 구분을 반영\n"
+        "- 같은 카테고리라도 포지션이 다르면 제외\n"
+        "- 최대 5개\n"
+        "- 확실한 것만\n\n"
+        "예시:\n"
+        "- 메가커피 기준이면 저가 커피 프랜차이즈 중심\n"
+        "- 스타벅스/투썸/폴바셋 등 포지션 차이가 크면 제외\n\n"
+        f"company_name: {company_name}\n"
+        f"features: {features}\n"
         f"competitor_candidates: {competitor_candidates}\n\n"
         "아래 JSON 형식으로만 출력:\n"
-        '{ "competitors": ["string"] }'
+        '{ "direct_competitors": ["string"] }'
     )
 
     try:
@@ -50,26 +67,31 @@ def refine_competitor_node(state: MarketResearchState) -> dict:
         raw = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)
     except Exception:
+        current_analysis["direct_competitors"] = []
+        current_analysis["market_peers"] = existing_market_peers
         return {"analysis": current_analysis}
 
-    # JSON 파싱 결과에서 competitors를 읽고 형식을 정리합니다.
-    competitors_raw = parsed.get("competitors", []) if isinstance(parsed, dict) else []
-    if not isinstance(competitors_raw, list):
-        competitors_raw = []
+    # JSON 파싱 결과를 정제하여 최대 5개 direct_competitors를 만듭니다.
+    direct_raw = parsed.get("direct_competitors", []) if isinstance(parsed, dict) else []
+    if not isinstance(direct_raw, list):
+        direct_raw = []
 
-    competitors: list[str] = []
+    direct_competitors: list[str] = []
     seen = set()
-    for item in competitors_raw:
+    for item in direct_raw:
         value = str(item).strip()
-        if not value or value in seen:
+        key = value.lower()
+        if not value or key in seen:
             continue
-        seen.add(value)
-        competitors.append(value)
-        if len(competitors) >= 5:
+        seen.add(key)
+        direct_competitors.append(value)
+        if len(direct_competitors) >= 5:
             break
 
-    # 기존 analysis는 유지하고 competitors만 정제 결과로 교체합니다.
-    current_analysis["competitors"] = competitors
+    # market_peers는 기존 값을 유지하고 direct_competitors만 갱신합니다.
+    current_analysis["direct_competitors"] = direct_competitors
+    current_analysis["market_peers"] = existing_market_peers
+
     return {
         "analysis": current_analysis,
     }

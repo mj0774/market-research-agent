@@ -14,7 +14,8 @@ def analyze_node(state: MarketResearchState) -> dict:
             "analysis": {
                 "summary": "",
                 "features": [],
-                "competitors": [],
+                "direct_competitors": [],
+                "market_peers": [],
             }
         }
 

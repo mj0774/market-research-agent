@@ -16,50 +16,47 @@ def analyze_company_documents(company_name: str, documents: list[str]) -> Analys
         documents: 분석 입력으로 사용할 문서 본문 목록입니다.
 
     Returns:
-        AnalysisResult: summary/features/competitors 구조의 분석 결과입니다.
+        AnalysisResult: summary/features/direct_competitors/market_peers 구조의 분석 결과입니다.
     """
     # OPENAI_API_KEY / OPENAI_MODEL 환경변수를 읽기 위해 .env를 로드합니다.
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return _fallback_result(company_name)
+        return _fallback_result()
 
     # 문서들을 하나의 프롬프트 컨텍스트로 합쳐 LLM을 1회 호출합니다.
     merged_documents = "\n\n---\n\n".join(documents)
     if not merged_documents.strip():
-        return _fallback_result(company_name)
+        return _fallback_result()
 
     prompt = (
-        "You are an analyst.\n"
-        "Analyze the following documents and extract company insights.\n"
-        "추측하지 말 것.\n"
-        "문서 내용 기반으로만 작성.\n"
-        "JSON 이외의 텍스트 출력 금지.\n\n"
-        "Rules:\n"
-        "- summary: concise company summary based only on documents.\n"
-        "- features: only the most important features, max 5 items.\n"
-        "- features: remove trivial or duplicate items.\n"
-        "- competitors: extract only company names explicitly mentioned in documents.\n"
-        "- competitors: if no clear competitor company name exists, return [].\n"
-        '- competitors: never output generic categories (e.g., "부대찌개 식당", "한식당").\n\n'
-        f"Company: {company_name}\n\n"
-        "Documents:\n"
-        f"{merged_documents}\n\n"
-        "Output must be exactly this JSON schema:\n"
-        '{\n'
+        "너는 시장 조사 분석가다.\n"
+        "아래 문서를 기반으로 업체 분석 결과를 JSON으로만 출력하라.\n\n"
+        "조건:\n"
+        "- summary: 업체 요약\n"
+        "- features: 핵심 특징 5개 이하\n"
+        "- direct_competitors: 문서에 실제로 확인되는 실명 경쟁사만 추출, 없으면 []\n"
+        "- market_peers: 동일 업종/시장군 브랜드 또는 업체군, 최대 5개\n"
+        "- 추측은 최소화\n"
+        "- JSON 외 텍스트 출력 금지\n\n"
+        f"기준 업체명: {company_name}\n"
+        f"문서:\n{merged_documents}\n\n"
+        "출력 JSON 형식:\n"
+        "{\n"
         '  "summary": "string",\n'
         '  "features": ["string"],\n'
-        '  "competitors": ["string"]\n'
-        '}'
+        '  "direct_competitors": ["string"],\n'
+        '  "market_peers": ["string"]\n'
+        "}"
     )
 
     try:
-        # LLM 분석 에이전트 호출: 한 번의 응답에서 구조화된 인사이트를 생성합니다.
+        # LLM 분석 호출: 한 번의 응답에서 구조화된 인사이트를 생성합니다.
         client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             messages=[
-                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "system", "content": "JSON 이외의 텍스트 출력 금지"},
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
@@ -68,73 +65,79 @@ def analyze_company_documents(company_name: str, documents: list[str]) -> Analys
         # 모델 응답을 JSON으로만 파싱합니다.
         raw = response.choices[0].message.content or "{}"
         parsed = json.loads(raw)
-        return _to_analysis_result(parsed, company_name)
+        return _to_analysis_result(parsed)
     except Exception:
-        return _fallback_result(company_name)
+        return _fallback_result()
 
 
-def _to_analysis_result(parsed: Any, company_name: str) -> AnalysisResult:
-    """파싱된 JSON을 AnalysisResult 스키마로 정규화합니다.
-
-    Args:
-        parsed: LLM 응답에서 파싱한 JSON 객체입니다.
-        company_name: fallback 요약문에 사용할 업체명입니다.
-
-    Returns:
-        AnalysisResult: 정제된 스키마 안전 분석 결과입니다.
-    """
-    # parsed는 반드시 dict 형태여야 합니다.
+def _to_analysis_result(parsed: Any) -> AnalysisResult:
+    """파싱된 JSON을 AnalysisResult 스키마로 정규화합니다."""
     if not isinstance(parsed, dict):
-        return _fallback_result(company_name)
+        return _fallback_result()
 
     features_raw = parsed.get("features", [])
-    competitors_raw = parsed.get("competitors", [])
+    direct_raw = parsed.get("direct_competitors", [])
+    peers_raw = parsed.get("market_peers", [])
+
     if not isinstance(features_raw, list):
         features_raw = []
-    if not isinstance(competitors_raw, list):
-        competitors_raw = []
+    if not isinstance(direct_raw, list):
+        direct_raw = []
+    if not isinstance(peers_raw, list):
+        peers_raw = []
 
-    # UI 표시 안정성을 위해 summary는 항상 값이 있도록 보장합니다.
     summary = str(parsed.get("summary", "")).strip()
-    if not summary:
-        summary = f"{company_name}에 대한 분석 결과를 생성하지 못했습니다."
 
-    # features는 중복 제거 후 최대 5개까지만 유지합니다.
+    # features는 중복 제거 후 최대 5개로 제한합니다.
     features: list[str] = []
+    seen_features = set()
     for item in features_raw:
         value = str(item).strip()
-        if not value or value in features:
+        key = value.lower()
+        if not value or key in seen_features:
             continue
+        seen_features.add(key)
         features.append(value)
         if len(features) >= 5:
             break
 
-    # competitors는 중복 없는 업체명만 유지합니다.
-    competitors: list[str] = []
-    for item in competitors_raw:
+    # direct_competitors는 실명 후보를 중복 제거해 유지합니다.
+    direct_competitors: list[str] = []
+    seen_direct = set()
+    for item in direct_raw:
         value = str(item).strip()
-        if not value or value in competitors:
+        key = value.lower()
+        if not value or key in seen_direct:
             continue
-        competitors.append(value)
+        seen_direct.add(key)
+        direct_competitors.append(value)
+
+    # market_peers는 중복 제거 후 최대 5개로 제한합니다.
+    market_peers: list[str] = []
+    seen_peers = set()
+    for item in peers_raw:
+        value = str(item).strip()
+        key = value.lower()
+        if not value or key in seen_peers:
+            continue
+        seen_peers.add(key)
+        market_peers.append(value)
+        if len(market_peers) >= 5:
+            break
 
     return AnalysisResult(
         summary=summary,
         features=features,
-        competitors=competitors,
+        direct_competitors=direct_competitors,
+        market_peers=market_peers,
     )
 
 
-def _fallback_result(company_name: str) -> AnalysisResult:
-    """분석 실패 시 안전한 기본 결과를 반환합니다.
-
-    Args:
-        company_name: fallback 요약문에 사용할 업체명입니다.
-
-    Returns:
-        AnalysisResult: 빈 features/competitors를 가진 기본 결과입니다.
-    """
+def _fallback_result() -> AnalysisResult:
+    """분석 실패 시 안전한 기본 결과를 반환합니다."""
     return AnalysisResult(
-        summary=f"{company_name}에 대한 분석 결과를 생성하지 못했습니다.",
+        summary="",
         features=[],
-        competitors=[],
+        direct_competitors=[],
+        market_peers=[],
     )
