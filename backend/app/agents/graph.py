@@ -2,6 +2,7 @@ from langgraph.graph import END, StateGraph
 
 from app.agents.nodes.analyze_node import analyze_node
 from app.agents.nodes.competitor_discovery_node import competitor_discovery_node
+from app.agents.nodes.market_keyword_node import market_keyword_node
 from app.agents.nodes.refine_competitor_node import refine_competitor_node
 from app.agents.nodes.scrape_node import scrape_node
 from app.agents.nodes.search_node import search_node
@@ -15,13 +16,15 @@ builder = StateGraph(MarketResearchState)
 builder.add_node("search", search_node)
 builder.add_node("scrape", scrape_node)
 builder.add_node("analyze", analyze_node)
+builder.add_node("market_keyword", market_keyword_node)
 builder.add_node("competitor_discovery", competitor_discovery_node)
 builder.add_node("refine_competitor", refine_competitor_node)
 
-# 실행 흐름을 search -> scrape -> analyze -> competitor_discovery -> refine_competitor -> END로 연결합니다.
+# 실행 흐름을 search -> scrape -> analyze -> market_keyword -> competitor_discovery -> refine_competitor -> END로 연결합니다.
 builder.add_edge("search", "scrape")
 builder.add_edge("scrape", "analyze")
-builder.add_edge("analyze", "competitor_discovery")
+builder.add_edge("analyze", "market_keyword")
+builder.add_edge("market_keyword", "competitor_discovery")
 builder.add_edge("competitor_discovery", "refine_competitor")
 builder.add_edge("refine_competitor", END)
 
