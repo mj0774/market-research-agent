@@ -25,10 +25,18 @@ def analyze(req: AnalyzeRequest):
         "company_name": req.company_name,
         "search_results": [],
         "documents": [],
+        "market_keywords": [],
+        "competitor_candidates": [],
         "analysis": {
             "summary": "",
             "features": [],
-            "competitors": [],
+            "direct_competitors": [],
+            "market_peers": [],
+        },
+        "report": {
+            "strengths": [],
+            "weaknesses": [],
+            "strategy": [],
         },
     }
 
