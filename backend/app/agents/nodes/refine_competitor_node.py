@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -11,6 +12,7 @@ def refine_competitor_node(state: MarketResearchState) -> dict:
     """경쟁사 후보에서 직접 경쟁사(direct_competitors)만 정제하는 노드입니다."""
     # 상태에서 업체명, 분석 특징, 경쟁사 후보를 가져옵니다.
     company_name = str(state.get("company_name", "")).strip()
+    company_name_lower = company_name.lower()
     competitor_candidates = state.get("competitor_candidates", [])
     if not isinstance(competitor_candidates, list):
         competitor_candidates = []
@@ -79,11 +81,18 @@ def refine_competitor_node(state: MarketResearchState) -> dict:
     direct_competitors: list[str] = []
     seen = set()
     for item in direct_raw:
-        value = str(item).strip()
-        key = value.lower()
-        if not value or key in seen:
+        value = _extract_brand_name(str(item))
+        if not value:
             continue
-        seen.add(key)
+
+        value_lower = value.lower()
+        # company_name이 포함된 값은 제외합니다.
+        if company_name_lower and company_name_lower in value_lower:
+            continue
+
+        if value_lower in seen:
+            continue
+        seen.add(value_lower)
         direct_competitors.append(value)
         if len(direct_competitors) >= 5:
             break
@@ -95,3 +104,58 @@ def refine_competitor_node(state: MarketResearchState) -> dict:
     return {
         "analysis": current_analysis,
     }
+
+
+def _extract_brand_name(text: str) -> str | None:
+    """브랜드명 추출 규칙을 적용해 가장 자연스러운 후보를 반환합니다."""
+    if not text:
+        return None
+
+    # 1) 대괄호/괄호 계열 제거
+    value = re.sub(r"[\[\]\(\)\{\}]", " ", text)
+
+    # 2) 일반 단어 제거
+    general_words = [
+        "저가커피",
+        "순위",
+        "추천",
+        "맛집",
+        "top",
+        "TOP",
+        "기사",
+        "뉴스",
+        "블로그",
+        "후기",
+    ]
+    for word in general_words:
+        value = value.replace(word, " ")
+
+    # 3) 구분자를 공백으로 치환
+    value = re.sub(r"[,/|:>\-]", " ", value)
+    value = " ".join(value.split())
+    if not value:
+        return None
+
+    # 4) 공백 기준 분리 후 가장 짧고 자연스러운 단어 선택
+    parts = value.split()
+    candidates: list[str] = []
+    for part in parts:
+        p = part.strip()
+        if not p:
+            continue
+        # 한글 포함 + 한글/숫자만 허용
+        if not re.search(r"[가-힣]", p):
+            continue
+        if not re.fullmatch(r"[가-힣0-9]+", p):
+            continue
+        # 10자 이상 제외
+        if len(p) >= 10:
+            continue
+        candidates.append(p)
+
+    if not candidates:
+        return None
+
+    # 가장 짧은 후보를 우선 선택 (동률이면 먼저 나온 값)
+    candidates.sort(key=len)
+    return candidates[0]
